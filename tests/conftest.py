@@ -301,6 +301,19 @@ def build_fixture(seed: int = 0) -> dict[str, list[Trajectory]]:
     return data
 
 
+def fixture_realizations(data: dict[str, list[Trajectory]]) -> dict[str, str]:
+    """Stand-in for the generator's realization of each incident: three pseudo-templates per cell."""
+    seen: dict[tuple, int] = {}
+    names = {}
+    for source in ("train", "test", "dilution"):
+        for t in data[source]:
+            if t.kind == "incident":
+                k = seen.get((source, t.harm, t.route), 0)
+                seen[(source, t.harm, t.route)] = k + 1
+                names[t.id] = f"{t.harm}_{t.route}_{k % 3}"
+    return names
+
+
 def write_fixture(out_dir: str | Path, seed: int = 0) -> dict[str, list[Trajectory]]:
     data = build_fixture(seed)
     for source, trajs in data.items():

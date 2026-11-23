@@ -222,3 +222,13 @@ Changes:
 
 Two tasks (fix a flaky test; audit maintenance) remain separable above 0.75 within the
 task. The report gives the per-task figures.
+
+**7. 24 November 2026, after the results for the trained and rule monitors had been seen
+and independently reviewed.** Two analyses were added after the fact and are reported
+separately from the experiments above as post hoc. P1 repeats the held-out violation
+experiment with the benign training trajectories of tasks left without any incident
+removed, because tasks are nearly specific to one violation and the planned design let a
+monitor learn that a held-out violation's tasks are safe. P2 holds out individual
+mistakes within routes the monitor has seen, because the same 57 mistakes generate
+training and test incidents, so the planned experiments could not tell a new route from a
+new mistake. No pre-registered result or verdict was changed.

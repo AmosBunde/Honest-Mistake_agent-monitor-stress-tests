@@ -2143,7 +2143,9 @@
     "script",
     "variable"
    ],
-   "pooled_gap_closed": -2.166666666666667
+   "pooled_gap_closed": -2.166666666666667,
+   "pooled_gap_closed_note": "sum of numerators over sum of denominators across ALL four folds, including folds left out of the mean (the degenerate direct fold)",
+   "pooled_gap_closed_included_folds": -0.041666666666666664
   },
   {
    "monitor": "artifact",
@@ -2159,7 +2161,9 @@
     "direct",
     "variable"
    ],
-   "pooled_gap_closed": -0.5934959349593496
+   "pooled_gap_closed": -0.5934959349593496,
+   "pooled_gap_closed_note": "sum of numerators over sum of denominators across ALL four folds, including folds left out of the mean (the degenerate direct fold)",
+   "pooled_gap_closed_included_folds": -0.08955223880597016
   },
   {
    "monitor": "embed",
@@ -2175,7 +2179,9 @@
     "script",
     "variable"
    ],
-   "pooled_gap_closed": -0.4411764705882353
+   "pooled_gap_closed": -0.4411764705882353,
+   "pooled_gap_closed_note": "sum of numerators over sum of denominators across ALL four folds, including folds left out of the mean (the degenerate direct fold)",
+   "pooled_gap_closed_included_folds": 0.03846153846153845
   },
   {
    "monitor": "embed",
@@ -2191,7 +2197,9 @@
     "direct",
     "script"
    ],
-   "pooled_gap_closed": -0.9076923076923075
+   "pooled_gap_closed": -0.9076923076923075,
+   "pooled_gap_closed_note": "sum of numerators over sum of denominators across ALL four folds, including folds left out of the mean (the degenerate direct fold)",
+   "pooled_gap_closed_included_folds": -0.011627906976744184
   },
   {
    "monitor": "tfidf",
@@ -2207,7 +2215,9 @@
    "folds_excluded": [
     "direct"
    ],
-   "pooled_gap_closed": -0.5660377358490566
+   "pooled_gap_closed": -0.5660377358490566,
+   "pooled_gap_closed_note": "sum of numerators over sum of denominators across ALL four folds, including folds left out of the mean (the degenerate direct fold)",
+   "pooled_gap_closed_included_folds": -0.010135135135135144
   },
   {
    "monitor": "tfidf",
@@ -2223,7 +2233,9 @@
    "folds_excluded": [
     "direct"
    ],
-   "pooled_gap_closed": -0.4253578732106339
+   "pooled_gap_closed": -0.4253578732106339,
+   "pooled_gap_closed_note": "sum of numerators over sum of denominators across ALL four folds, including folds left out of the mean (the degenerate direct fold)",
+   "pooled_gap_closed_included_folds": 0.013071895424836596
   },
   {
    "monitor": "trace",
@@ -2239,7 +2251,9 @@
    "folds_excluded": [
     "direct"
    ],
-   "pooled_gap_closed": -0.4413145539906104
+   "pooled_gap_closed": -0.4413145539906104,
+   "pooled_gap_closed_note": "sum of numerators over sum of denominators across ALL four folds, including folds left out of the mean (the degenerate direct fold)",
+   "pooled_gap_closed_included_folds": -0.002053388090349055
   },
   {
    "monitor": "trace",
@@ -2255,7 +2269,9 @@
    "folds_excluded": [
     "direct"
    ],
-   "pooled_gap_closed": -0.16393442622950827
+   "pooled_gap_closed": -0.16393442622950827,
+   "pooled_gap_closed_note": "sum of numerators over sum of denominators across ALL four folds, including folds left out of the mean (the degenerate direct fold)",
+   "pooled_gap_closed_included_folds": 0.1516245487364621
   }
  ],
  "notes": "gap_closed = (R leave-one-out - R direct-only) / (R all-four - R direct-only) on the held-out route. A fold enters the mean only if its gap (the denominator) is at least 0.05; pooled_gap_closed is the sum of numerators over the sum of denominators across all folds. Every regime is trained on the same number of incidents (see meta)."

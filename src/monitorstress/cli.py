@@ -1,4 +1,4 @@
-"""Command line: monitorstress generate | run | bench-llm | figures."""
+"""Command line: monitorstress generate | run | posthoc | reanalyze | bench-llm | figures."""
 from __future__ import annotations
 
 import argparse
@@ -61,6 +61,24 @@ def _cmd_bench_llm(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_posthoc(args: argparse.Namespace) -> int:
+    from . import experiments, posthoc
+
+    opts = experiments.Options(data_dir=args.data, out_dir=args.out, embed_cache_dir=args.embed_cache, seed=args.seed)
+    chosen = tuple(a.strip().upper() for a in args.analyses.split(","))
+    for name, result in posthoc.run(opts, analyses=chosen, threads=args.threads).items():
+        print(f"{name}: {len(result['rows'])} rows -> {Path(args.out) / ('posthoc_' + name + '.json')}")
+    return 0
+
+
+def _cmd_reanalyze(args: argparse.Namespace) -> int:
+    from . import experiments
+
+    summary = experiments.reanalyze(args.out)
+    print(json.dumps({p["id"]: p["verdict"] for p in summary["predictions"]}, indent=1))
+    return 0
+
+
 def _cmd_figures(args: argparse.Namespace) -> int:
     from . import figures
 
@@ -108,6 +126,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--out", default=None, help="write the timings to this JSON file")
     p.set_defaults(func=_cmd_bench_llm)
+
+    p = sub.add_parser("posthoc", help="post hoc analyses P1 and P2 (added after the first results; in no verdict)")
+    p.add_argument("--data", default="data/")
+    p.add_argument("--out", default="results/")
+    p.add_argument("--analyses", default="P1,P2")
+    p.add_argument("--threads", type=int, default=2)
+    p.add_argument("--embed-cache", default=None)
+    p.add_argument("--seed", type=int, default=2026, help="must be the seed the experiments were run with")
+    p.set_defaults(func=_cmd_posthoc)
+
+    p = sub.add_parser("reanalyze", help="recompute results/E*.json and summary.json from the score CSVs; runs no monitor")
+    p.add_argument("--out", default="results/")
+    p.set_defaults(func=_cmd_reanalyze)
 
     p = sub.add_parser("figures", help="draw the figures from results/*.json")
     p.add_argument("--results", default="results/")

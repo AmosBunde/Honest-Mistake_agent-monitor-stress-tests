@@ -269,6 +269,7 @@ class Runner:
         self.llm_cache = ScoreCache(Path(opts.out_dir) / "llm_cache.csv")
         self._encoder: MiniLMEncoder | None = None
         self._monitors: dict[tuple, object] = {}
+        self.custom_train_sets: dict[str, list[Trajectory]] = {}
         self._llm_backends: dict[str, LLMBackend] = {}
         self._scores: dict[tuple, np.ndarray] = {}
         self.meta: dict[str, dict] = defaultdict(dict)
@@ -292,6 +293,8 @@ class Runner:
 
     # ---- training sets
     def train_set(self, regime_key: str) -> list[Trajectory]:
+        if regime_key in self.custom_train_sets:  # regimes defined outside E1-E7 (post hoc analyses)
+            return self.custom_train_sets[regime_key]
         incidents = self.train_incidents
         cell = lambda t: (t.route, t.harm, t.awareness)  # noqa: E731
         seed = self.opts.seed
@@ -637,7 +640,33 @@ def analyze_e1(df: pd.DataFrame) -> dict:
                     **metrics.evaluate_at_fpr(val, ben, inc["score"], fpr),
                     "auroc": area["auroc"], "auroc_ci_low": area["ci_low"], "auroc_ci_high": area["ci_high"],
                 })
-    return {"rows": rows}
+    result = {"rows": rows}
+    rules = df[df["monitor"] == "rules"]
+    if len(rules):
+        result["rules_operating_points"] = operating_points(rules)
+        result["rules_operating_points_note"] = (
+            "The rules monitor's scores take few distinct values, so only these operating points exist. Each row is "
+            "one distinct score used as the threshold (flag when the score is strictly above it), on the full sets.")
+    return result
+
+
+def operating_points(group: pd.DataFrame) -> list[dict]:
+    """Every operating point a monitor with tied scores can realize: one per distinct score value."""
+    val, ben = _benign(group, "val")["score"].to_numpy(), _benign(group, "test")["score"].to_numpy()
+    direct = _incidents(group, "test")
+    direct = direct[direct["route"] == "direct"]
+    unaware = direct[direct["awareness"] == "unaware"]["score"].to_numpy()
+    direct = direct["score"].to_numpy()
+    points = []
+    for threshold in sorted(set(np.concatenate([val, ben, direct]).tolist()), reverse=True):
+        points.append({
+            "threshold": threshold,
+            "val_fpr": metrics.rate_above(val, threshold), "test_fpr": metrics.rate_above(ben, threshold),
+            "recall_direct": metrics.rate_above(direct, threshold),
+            "recall_direct_unaware": metrics.rate_above(unaware, threshold),
+            "n_val_benign": int(len(val)), "n_test_benign": int(len(ben)), "n_direct": int(len(direct)),
+        })
+    return points
 
 
 def analyze_e2(df: pd.DataFrame) -> dict:
@@ -668,6 +697,13 @@ def _ratio_draws(direct: np.ndarray, held: np.ndarray, full: np.ndarray) -> np.n
     d, h, f = (metrics.bootstrap_means(x) for x in (direct, held, full))
     with np.errstate(divide="ignore", invalid="ignore"):
         return np.where(np.abs(f - d) > 1e-12, (h - d) / (f - d), np.nan)
+
+
+def _pooled_ratio(folds: list[dict]) -> float | None:
+    """Sum of (leave-one-out - direct-only) over sum of (all-four - direct-only) across the given folds."""
+    num = sum(f["leave_one_out"].mean() - f["direct_only"].mean() for f in folds)
+    den = sum(f["all_four"].mean() - f["direct_only"].mean() for f in folds)
+    return float(num / den) if folds and abs(den) > 1e-12 else None
 
 
 def analyze_e3(df: pd.DataFrame) -> dict:
@@ -720,6 +756,9 @@ def analyze_e3(df: pd.DataFrame) -> dict:
                 "folds_included": [x["fold"] for x in counted],
                 "folds_excluded": [r for r in fold_flags if r not in {x["fold"] for x in counted}],
                 "pooled_gap_closed": float(pooled_num / pooled_den) if abs(pooled_den) > 1e-12 else None,
+                "pooled_gap_closed_note": "sum of numerators over sum of denominators across ALL four folds, "
+                                          "including folds left out of the mean (the degenerate direct fold)",
+                "pooled_gap_closed_included_folds": _pooled_ratio([fold_flags[x["fold"]] for x in counted]),
             })
     return {
         "rows": rows, "gap_closed": gaps, "gap_closed_mean": means,
@@ -1013,6 +1052,25 @@ _COMPACT = {
 }
 
 
+def posthoc_block(out_dir: Path) -> dict:
+    """Compact tables of the post hoc analyses (results/posthoc_*.json). They feed no prediction verdict."""
+    block = {}
+    for path in sorted(Path(out_dir).glob("posthoc_*.json")):
+        result = json.loads(path.read_text())
+        block[result["analysis"]] = {"description": result["description"], "file": path.name,
+                                     "table": result.get("summary_table", [])}
+    return block
+
+
+def reanalyze(out_dir: str | Path) -> dict:
+    """Recompute every results/E*.json from its score CSV, then summary.json. No monitor is run."""
+    out_dir = Path(out_dir)
+    for experiment in EXPERIMENTS:
+        if (out_dir / "scores" / f"{experiment}.csv").exists():
+            analyze_from_csv(experiment, out_dir)
+    return build_summary(out_dir)
+
+
 def build_summary(out_dir: str | Path) -> dict:
     """results/summary.json from whichever results/E*.json exist."""
     out_dir = Path(out_dir)
@@ -1044,6 +1102,7 @@ def build_summary(out_dir: str | Path) -> dict:
         "llm_subsample": {k: subsample.get(k) for k in ("args", "n")},
         "predictions": evaluate_predictions(results),
         "tables": tables,
+        "posthoc": posthoc_block(out_dir),
     }
     write_json(out_dir / "summary.json", summary)
     return summary

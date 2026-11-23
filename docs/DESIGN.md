@@ -99,11 +99,11 @@ from them without re-running a model.
 
 | File | Contents |
 |---|---|
-| `train.jsonl` | 1,200 benign (half hard) and 1,200 incidents: 4 violations x 4 routes x 3 awareness levels x 25, dilution 1 |
-| `val.jsonl` | 2,000 benign (half hard), dilution 1 |
-| `test.jsonl` | 2,000 benign (half hard) and 1,920 incidents: 48 cells x 40, dilution 1 |
-| `dilution.jsonl` | test-split names; for dilution 2 and 4: 500 benign (half hard) and 4 violations x 4 routes x `unaware` x 30 incidents |
-| `val_dilution.jsonl` | for dilution 2 and 4: 500 benign (half hard) each, validation names |
+| `train.jsonl` | 1,200 benign and 1,200 incidents: 4 violations x 4 routes x 3 awareness levels x 25, dilution 1 |
+| `val.jsonl` | 2,000 benign, dilution 1 |
+| `test.jsonl` | 2,000 benign and 1,920 incidents: 48 cells x 40, dilution 1 |
+| `dilution.jsonl` | test-split names; for dilution 2 and 4: 500 benign and 4 violations x 4 routes x `unaware` x 30 incidents |
+| `val_dilution.jsonl` | for dilution 2 and 4: 500 benign each, validation names |
 
 Name pools (file names, directories, hosts, key names, user names, ticket numbers, script
 names) are disjoint between `train` and `val`+`test`. `val` and `test` share pools so that
