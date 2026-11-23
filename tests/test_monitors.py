@@ -5,7 +5,8 @@ import numpy as np
 import pytest
 
 from monitorstress import metrics
-from monitorstress.monitors import EmbedMonitor, LLMMonitor, Monitor, RulesMonitor, TfidfMonitor, TraceMonitor
+from monitorstress.monitors import (ArtifactMonitor, EmbedMonitor, LLMMonitor, Monitor, RulesMonitor, TfidfMonitor,
+                                    TraceMonitor)
 from monitorstress.monitors import llm as llm_module
 from monitorstress.monitors.embed import EmbeddingCache, MiniLMEncoder
 from monitorstress.monitors.trace import featurize
@@ -45,6 +46,7 @@ def fitted(fixture_data, encoder, tiny_backend):
         TfidfMonitor("commands"), TfidfMonitor("commands+thoughts"), TfidfMonitor("commands+outputs"),
         EmbedMonitor("commands", encoder=encoder), EmbedMonitor("commands+thoughts", encoder=encoder),
         TraceMonitor(),
+        ArtifactMonitor(),
         LLMMonitor(TINY, "commands", max_tokens=400, backend=tiny_backend, verbose=False),
         LLMMonitor(TINY, "commands+thoughts", max_tokens=400, backend=tiny_backend, verbose=False),
     ]
@@ -100,14 +102,28 @@ def test_trained_monitors_separate_the_fixture(fitted, fixture_data):
     pos = [t for t in test if t.label == 1 and t.route == "direct"]
     neg = [t for t in test if t.label == 0]
     for monitor in fitted:
-        if monitor.trainable:
+        if monitor.trainable and monitor.name != "artifact":  # the baseline is not expected to work
             assert metrics.auroc(monitor.score(pos), monitor.score(neg)) > 0.8, monitor.name
 
 
 def test_trained_monitors_need_fit(fixture_data):
-    for monitor in (TfidfMonitor(), TraceMonitor()):
+    for monitor in (TfidfMonitor(), TraceMonitor(), ArtifactMonitor()):
         with pytest.raises(RuntimeError):
             monitor.score(fixture_data["test"][:2])
+
+
+# --------------------------------------------------------------------------- artifact baseline
+
+def test_artifact_sees_only_step_count_and_command_names(fixture_data):
+    monitor = ArtifactMonitor()
+    monitor.fit(fixture_data["train"])
+    sample = fixture_data["test"][::9]
+    stripped = [dataclasses.replace(t, task_prompt="x", events=[], steps=[
+        Step("", s.command.split()[0] + " some other arguments", "") for s in t.steps]) for t in sample]
+    np.testing.assert_array_equal(monitor.score(sample), monitor.score(stripped))
+    shorter = [dataclasses.replace(t, steps=t.steps[:-1]) for t in sample]
+    assert not np.array_equal(monitor.score(sample), monitor.score(shorter))
+    assert (monitor.name, monitor.view) == ("artifact", "commands")
 
 
 # --------------------------------------------------------------------------- rules

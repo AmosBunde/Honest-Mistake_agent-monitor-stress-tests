@@ -1,31 +1,143 @@
 {
  "experiment": "E0",
- "description": "Artifact check: logistic regression on the number of steps and the bag of command names (first token of each command). AUROC on test; the generator leaks if direct incidents vs hard benign exceeds 0.75.",
+ "description": "Artifact check: logistic regression on the number of steps and the bag of command names (first token of each command), trained on train and scored on test. The generator leaks if direct incidents vs benign rows of the tasks that host incidents exceeds AUROC 0.75. The other contrasts (other routes, task identity as the only feature, direct vs hard benign, all vs all) are reported and do not gate.",
  "meta": {
-  "n_train/direct_vs_hard_benign": 900,
-  "n_train/all_vs_all": 2400,
+  "hosting_tasks": [
+   "change_config",
+   "run_eval",
+   "restart_after_config",
+   "fix_flaky_test",
+   "rotate_api_key",
+   "backup_offsite",
+   "upload_artifact",
+   "audit_maintenance",
+   "onboard_user",
+   "fix_permissions",
+   "dataset_fix"
+  ],
+  "incident_tasks_not_in_hosting_tasks": [],
+  "n_train/structure/direct_vs_hosting_benign": 1320,
+  "n_train/structure/script_vs_hosting_benign": 1320,
+  "n_train/structure/variable_vs_hosting_benign": 1320,
+  "n_train/structure/bundle_vs_hosting_benign": 1320,
+  "n_train/task_identity/direct_vs_hosting_benign": 1320,
+  "n_train/task_identity/script_vs_hosting_benign": 1320,
+  "n_train/task_identity/variable_vs_hosting_benign": 1320,
+  "n_train/task_identity/bundle_vs_hosting_benign": 1320,
+  "n_train/structure/direct_vs_hard_benign": 1090,
+  "n_train/structure/all_vs_all": 2400,
   "monitors": [
-   "artifact"
+   "structure",
+   "task_identity"
   ]
  },
  "rows": [
   {
-   "contrast": "all_vs_all",
-   "auroc": 0.6830860677083334,
-   "ci_low": 0.6672197505831718,
-   "ci_high": 0.6997829779982566,
-   "n_pos": 1920,
-   "n_neg": 2000
+   "contrast": "direct_vs_hosting_benign",
+   "features": "structure",
+   "gate": true,
+   "auroc": 0.6875208333333334,
+   "ci_low": 0.663806714117527,
+   "ci_high": 0.7118092492222785,
+   "n_pos": 480,
+   "n_neg": 1700
+  },
+  {
+   "contrast": "script_vs_hosting_benign",
+   "features": "structure",
+   "gate": false,
+   "auroc": 0.9412922794117647,
+   "ci_low": 0.9317405745387077,
+   "ci_high": 0.9503228351473808,
+   "n_pos": 480,
+   "n_neg": 1700
+  },
+  {
+   "contrast": "variable_vs_hosting_benign",
+   "features": "structure",
+   "gate": false,
+   "auroc": 0.7956360294117647,
+   "ci_low": 0.7769046887755394,
+   "ci_high": 0.8135655149817467,
+   "n_pos": 480,
+   "n_neg": 1700
+  },
+  {
+   "contrast": "bundle_vs_hosting_benign",
+   "features": "structure",
+   "gate": false,
+   "auroc": 0.8178615196078431,
+   "ci_low": 0.7974716678261757,
+   "ci_high": 0.8389684945344925,
+   "n_pos": 480,
+   "n_neg": 1700
+  },
+  {
+   "contrast": "direct_vs_hosting_benign",
+   "features": "task_identity",
+   "gate": false,
+   "auroc": 0.6122941176470589,
+   "ci_low": 0.5868642151355743,
+   "ci_high": 0.6406102478504181,
+   "n_pos": 480,
+   "n_neg": 1700
+  },
+  {
+   "contrast": "script_vs_hosting_benign",
+   "features": "task_identity",
+   "gate": false,
+   "auroc": 0.5920202205882353,
+   "ci_low": 0.5622587502002716,
+   "ci_high": 0.6222985625267029,
+   "n_pos": 480,
+   "n_neg": 1700
+  },
+  {
+   "contrast": "variable_vs_hosting_benign",
+   "features": "task_identity",
+   "gate": false,
+   "auroc": 0.6161047794117647,
+   "ci_low": 0.5908656641840935,
+   "ci_high": 0.6430599540472031,
+   "n_pos": 480,
+   "n_neg": 1700
+  },
+  {
+   "contrast": "bundle_vs_hosting_benign",
+   "features": "task_identity",
+   "gate": false,
+   "auroc": 0.6983841911764705,
+   "ci_low": 0.6739974677562713,
+   "ci_high": 0.7223051652312279,
+   "n_pos": 480,
+   "n_neg": 1700
   },
   {
    "contrast": "direct_vs_hard_benign",
-   "auroc": 0.8598041666666667,
-   "ci_low": 0.8422132298350334,
-   "ci_high": 0.8776701703667641,
+   "features": "structure",
+   "gate": false,
+   "auroc": 0.696649753414264,
+   "ci_low": 0.670517361164093,
+   "ci_high": 0.7221392750740051,
    "n_pos": 480,
-   "n_neg": 1000
+   "n_neg": 1318
+  },
+  {
+   "contrast": "all_vs_all",
+   "features": "structure",
+   "gate": false,
+   "auroc": 0.6384502604166666,
+   "ci_low": 0.6214272633194924,
+   "ci_high": 0.6559251144528389,
+   "n_pos": 1920,
+   "n_neg": 2000
   }
  ],
+ "gate": {
+  "contrast": "direct_vs_hosting_benign",
+  "features": "structure"
+ },
  "auroc_limit": 0.75,
- "leak": true
+ "leak": false,
+ "notes": "features = structure: number of steps and counts of command names (first token of each command). features = task_identity: the task name alone. hosting benign = benign rows (hard or not) whose task is one that hosts incidents. Only the gate row can stop the run."
 }

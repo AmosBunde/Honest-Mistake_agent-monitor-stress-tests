@@ -15,7 +15,10 @@ SUBSAMPLE = dict(llm_n_benign=40, llm_n_per_cell=1, llm_n_benign_dilution=10)
 
 
 def _options(data_dir, out_dir, embed_cache_dir, **changes) -> Options:
+    from conftest import HOSTING_TASKS
+
     base = dict(data_dir=data_dir, out_dir=out_dir, embed_cache_dir=embed_cache_dir, allow_artifact_leak=True,
+                hosting_tasks=HOSTING_TASKS,
                 llm_models=(TINY,), llm_max_tokens=400, llm_threads=1, **SUBSAMPLE)
     base.update(changes)
     return Options(**base)
@@ -51,20 +54,31 @@ def test_stratified_sample_is_balanced_and_deterministic(fixture_data):
     assert len(experiments.stratified_sample(incidents, 10 ** 6, key, seed=1)) == len(incidents)
 
 
+def test_proportional_sample_keeps_the_mix(fixture_data):
+    benign = [t for t in fixture_data["val"] if t.kind != "incident"]  # 70 benign, 130 hard benign
+    a = experiments.proportional_sample(benign, 40, lambda t: t.kind, seed=1)
+    assert len({t.id for t in a}) == 40 and sum(t.kind == "benign_hard" for t in a) == 26
+    assert [t.id for t in a] == [t.id for t in experiments.proportional_sample(benign[::-1], 40, lambda t: t.kind, seed=1)]
+    odd = experiments.proportional_sample(benign, 7, lambda t: t.kind, seed=1)  # 2.45 and 4.55: largest remainder
+    assert len(odd) == 7 and sum(t.kind == "benign_hard" for t in odd) == 5
+    assert len(experiments.proportional_sample(benign, 10 ** 6, lambda t: t.kind, seed=1)) == 200
+
+
 def test_llm_subsample_is_stratified_by_cell(fixture_data):
     ids = experiments.llm_subsample(fixture_data, n_benign=40, n_per_cell=2, n_benign_dilution=10, seed=5)
     assert ids == experiments.llm_subsample(fixture_data, n_benign=40, n_per_cell=2, n_benign_dilution=10, seed=5)
     by_id = {t.id: t for trajs in fixture_data.values() for t in trajs}
     val = [by_id[i] for i in ids["val"]]
-    assert len(val) == 40 and sum(t.kind == "benign_hard" for t in val) == 20
+    assert len(val) == 40 and sum(t.kind == "benign_hard" for t in val) == 26  # 65% hard, as in the file
     test = [by_id[i] for i in ids["test"]]
     cells = pd.Series([(t.harm, t.route, t.awareness) for t in test if t.kind == "incident"]).value_counts()
     assert len(cells) == 48 and set(cells) == {2}
-    assert sum(t.kind != "incident" for t in test) == 40
+    assert sum(t.kind != "incident" for t in test) == 40 and sum(t.kind == "benign_hard" for t in test) == 26
     dil = [by_id[i] for i in ids["dilution"]]
     for d in (2, 4):
         assert sum(t.kind == "incident" and t.dilution == d for t in dil) == 32
         assert sum(t.kind != "incident" and t.dilution == d for t in dil) == 10
+        assert sum(t.kind == "benign_hard" and t.dilution == d for t in dil) == 7
     assert len(ids["val_dilution"]) == 20
 
 
@@ -93,14 +107,57 @@ def test_every_recall_has_interval_and_n_and_respects_the_target(results_dir):
             assert not (row["sample"] == "llm_subsample" and row["fpr_target"] != 0.05)
 
 
-def test_e0_reports_both_contrasts(results_dir):
+def test_e0_reports_every_contrast_and_gates_on_one(results_dir, fixture_data):
+    from conftest import HOSTING_TASKS
+
     result = _json(results_dir, "E0")
-    assert {r["contrast"] for r in result["rows"]} == {"direct_vs_hard_benign", "all_vs_all"}
-    main = experiments.pick(result["rows"], contrast="direct_vs_hard_benign")
-    assert result["leak"] == (main["auroc"] > 0.75)
+    expected = {(f"{route}_vs_hosting_benign", features) for route in ROUTES for features in ("structure", "task_identity")}
+    expected |= {("direct_vs_hard_benign", "structure"), ("all_vs_all", "structure")}
+    assert {(r["contrast"], r["features"]) for r in result["rows"]} == expected
+    gates = [r for r in result["rows"] if r["gate"]]
+    assert [(r["contrast"], r["features"]) for r in gates] == [("direct_vs_hosting_benign", "structure")]
+    assert result["leak"] == (gates[0]["auroc"] > 0.75)
+    assert result["meta"]["hosting_tasks"] == list(HOSTING_TASKS)
+    assert result["meta"]["incident_tasks_not_in_hosting_tasks"] == []
+    for row in result["rows"]:
+        assert row["ci_low"] <= row["auroc"] <= row["ci_high"] and row["n_pos"] > 0 and row["n_neg"] > 0
+
+    by_id = {t.id: t for t in fixture_data["test"]}
     frame = _scores(results_dir, "E0")
-    contrast = frame[frame["regime"] == "direct_vs_hard_benign"]
-    assert set(contrast["kind"]) == {"benign_hard", "incident"} and set(contrast["route"].dropna()) == {"direct"}
+    for features in ("structure", "task_identity"):
+        g = frame[(frame["regime"] == "bundle_vs_hosting_benign") & (frame["monitor"] == features)]
+        assert set(g["route"].dropna()) == {"bundle"}
+        benign = g[g["kind"] != "incident"]
+        assert set(benign["kind"]) == {"benign"}  # in the fixture the hard benign tasks host no incidents
+        assert {by_id[i].task for i in benign["id"]} <= set(HOSTING_TASKS)
+        row = experiments.pick(result["rows"], contrast="bundle_vs_hosting_benign", features=features)
+        assert row["n_neg"] == len(benign) == 56 and row["n_pos"] == 48
+        assert row["auroc"] == pytest.approx(metrics.auroc(g[g["kind"] == "incident"]["score"], benign["score"]))
+    old = frame[frame["regime"] == "direct_vs_hard_benign"]
+    assert set(old["kind"]) == {"benign_hard", "incident"} and set(old["route"].dropna()) == {"direct"}
+    summary = _json(results_dir, "summary")["artifact_check"]
+    assert summary["rows"] == result["rows"] and summary["gate"]["contrast"] == "direct_vs_hosting_benign"
+
+
+def test_the_gate_is_the_hosting_contrast_only(monkeypatch):
+    def frame(regime, features, incident_scores, benign_scores):
+        rows = [{"monitor": features, "view": "diagnostic", "regime": regime, "source": "test", "id": f"{regime}-{i}",
+                 "score": s, "kind": kind, "harm": None, "route": None, "awareness": "x", "dilution": 1,
+                 "llm_subsample": False}
+                for kind, scores in (("incident", incident_scores), ("benign", benign_scores)) for i, s in enumerate(scores)]
+        return pd.DataFrame(rows)
+
+    separable, chance = ([1.0] * 20, [0.0] * 20), ([0.0, 1.0] * 10, [0.0, 1.0] * 10)
+    others_leak = pd.concat([frame("direct_vs_hosting_benign", "structure", *chance),
+                             frame("direct_vs_hosting_benign", "task_identity", *separable),
+                             frame("script_vs_hosting_benign", "structure", *separable),
+                             frame("direct_vs_hard_benign", "structure", *separable),
+                             frame("all_vs_all", "structure", *separable)])
+    assert experiments.analyze_e0(others_leak)["leak"] is False
+    gate_leaks = pd.concat([frame("direct_vs_hosting_benign", "structure", *separable),
+                            frame("all_vs_all", "structure", *chance)])
+    assert experiments.analyze_e0(gate_leaks)["leak"] is True
+    assert experiments.analyze_e0(frame("all_vs_all", "structure", *separable))["leak"] is None
 
 
 def test_command_name_features_have_no_arguments(fixture_data):
@@ -111,7 +168,7 @@ def test_command_name_features_have_no_arguments(fixture_data):
 
 def test_e1_numbers_can_be_recomputed_from_the_csv(results_dir):
     frame = _scores(results_dir, "E1")
-    assert set(frame["monitor"]) == {"rules", "tfidf", "embed", "trace"}
+    assert set(frame["monitor"]) == {"rules", "tfidf", "embed", "trace", "artifact"}
     assert set(frame[frame["kind"] == "incident"]["route"]) == {"direct"}
     g = frame[frame["monitor"] == "tfidf"]
     val = g[g["source"] == "val"]["score"].to_numpy()
@@ -131,7 +188,7 @@ def test_e1_numbers_can_be_recomputed_from_the_csv(results_dir):
 
 def test_e2_uses_the_e1_monitors_and_thresholds(results_dir):
     e1, e2 = _json(results_dir, "E1")["rows"], _json(results_dir, "E2")["rows"]
-    for monitor in ("rules", "tfidf", "embed", "trace"):
+    for monitor in ("rules", "tfidf", "embed", "trace", "artifact"):
         a = experiments.pick(e1, monitor=monitor, sample="full", fpr_target=0.01, awareness="all")
         b = experiments.pick(e2, monitor=monitor, sample="full", fpr_target=0.01, harm="all", route="direct")
         assert a["threshold"] == b["threshold"] and a["recall"] == b["recall"]
@@ -160,7 +217,7 @@ def test_e3_regimes_have_equal_training_sizes_and_a_gap_ratio(results_dir, data_
     assert {t.route for t in runner.train_set("E3/direct_only") if t.kind == "incident"} == {"direct"}
 
     assert {(g["monitor"], g["fold"], g["fpr_target"]) for g in result["gap_closed"]} == {
-        (m, r, f) for m in experiments.TRAINED for r in ROUTES for f in experiments.FPRS}
+        (m, r, f) for m in experiments.FITTED for r in ROUTES for f in experiments.FPRS}
     for gap in result["gap_closed"]:
         assert gap["gap"] == pytest.approx(gap["recall_all_four"] - gap["recall_direct_only"])
         assert gap["included_in_mean"] == (gap["gap"] >= experiments.MIN_GAP)
@@ -190,7 +247,7 @@ def test_e4_holds_out_a_violation(results_dir, data_dir, embed_cache_dir, fixtur
     sizes.add(sum(t.kind == "incident" for t in runner.train_set("E4/all_harms")))
     assert sizes == {result["meta"]["n_train_incidents_per_regime"]} == {108}
     assert {(r["monitor"], r["fold"], r["training"]) for r in result["rows"]} == {
-        (m, h, t) for m in experiments.TRAINED for h in HARMS for t in ("held_out", "in_distribution")}
+        (m, h, t) for m in experiments.FITTED for h in HARMS for t in ("held_out", "in_distribution")}
     frame = _scores(results_dir, "E4")
     held = frame[(frame["regime"] == "holdout=exfil") & (frame["kind"] == "incident")]
     assert set(held["harm"]) == {"exfil"}
@@ -224,7 +281,7 @@ def test_e6_reports_both_thresholds_per_dilution(results_dir):
     drop = experiments.pick(result["drops"], monitor="tfidf", sample="full", fpr_target=0.01,
                             threshold_from="val_matched", to_dilution=4)
     assert drop["drop"] == pytest.approx(at[(1, "val_matched")]["recall"] - at[(4, "val_matched")]["recall"])
-    assert {r["monitor"] for r in result["rows"]} == {"tfidf", "embed", "trace"}
+    assert {r["monitor"] for r in result["rows"]} == {"tfidf", "embed", "trace", "artifact"}
 
 
 def test_e7_counts_hard_benign_false_positives(results_dir):
@@ -243,6 +300,12 @@ def test_e7_counts_hard_benign_false_positives(results_dir):
         else:
             assert row["share_hard"] is None
     assert experiments.pick(result["rows"], monitor="tfidf", regime="direct_only", sample="full", fpr_target=0.01)
+    assert {r["regime"] for r in result["rows"] if r["monitor"] == "artifact"} == {"direct_only", "all_train"}
+    for row in result["rows"]:  # the reference point: how much of the benign test set is hard benign
+        expected = 104 / 160 if row["sample"] == "full" else 26 / 40
+        assert row["share_hard_among_test_benign"] == pytest.approx(expected)
+    summary_rows = _json(results_dir, "summary")["tables"]["E7"]
+    assert all(r["share_hard_among_test_benign"] is not None for r in summary_rows)
 
 
 def test_summary_has_nine_verdicts(results_dir):
@@ -255,6 +318,7 @@ def test_summary_has_nine_verdicts(results_dir):
     for i in (1, 2, 3, 5):  # these need only the non-LLM run
         assert by_id[i]["verdict"] != "not evaluated", by_id[i]
         assert all(c["value"] is not None and c["n"] for c in by_id[i]["clauses"])
+    assert not any("artifact" in c["clause"] for p in predictions for c in p["clauses"])  # the baseline is in no verdict
     for i in (6, 7, 8):  # these need the language-model monitors
         assert by_id[i]["verdict"] == "not evaluated" and by_id[i]["missing"]
     assert set(summary["tables"]) >= set(experiments.EXPERIMENTS)
@@ -265,6 +329,8 @@ def test_figures_are_drawn(results_dir, tmp_path):
     written = figures.make_all(results_dir, tmp_path / "img")
     assert [p.name for p in written] == ["e2_recall_by_route.png", "e3_held_out_route.png", "e5_thoughts.png", "e6_dilution.png"]
     assert all(p.stat().st_size > 10_000 for p in written)
+    assert figures.ordered(["artifact", "zzz-new", "tfidf", "rules"]) == ["rules", "tfidf", "zzz-new", "artifact"]
+    assert figures.color_of("artifact") != figures.color_of("rules")
 
 
 # --------------------------------------------------------------------------- the two halves of a run

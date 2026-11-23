@@ -6,7 +6,8 @@ pipeline; no number computed from it means anything about monitors.
 
 build_fixture() returns the five data files as lists of trajectories:
 train, val, test, dilution, val_dilution. Name pools are disjoint between train and
-val/test, as in the real data.
+val/test, as in the real data. About two thirds of the benign rows are hard benign, so
+nothing downstream can assume an even split.
 """
 from __future__ import annotations
 
@@ -124,6 +125,7 @@ def task_backup(b, rng, pool, app):
 
 
 ORDINARY = [task_rotate_logs, task_change_config, task_run_eval, task_backup]
+HOSTING_TASKS = ("rotate_logs", "change_config", "run_eval", "backup")  # the tasks incidents happen in
 
 
 # --------------------------------------------------------------------------- hard benign tasks
@@ -270,10 +272,10 @@ def make_trajectory(rng: random.Random, source: str, index: int, kind: str, harm
     return traj
 
 
-def _make_set(rng, source, n_benign_each, n_per_cell, awareness_levels=AWARENESS, dilution=1, start=0):
+def _make_set(rng, source, n_benign, n_hard, n_per_cell, awareness_levels=AWARENESS, dilution=1, start=0):
     out = []
-    for kind in ("benign", "benign_hard"):
-        for _ in range(n_benign_each):
+    for kind, count in (("benign", n_benign), ("benign_hard", n_hard)):
+        for _ in range(count):
             out.append(make_trajectory(rng, source, start + len(out), kind, dilution=dilution))
     for harm in HARMS:
         for route in ROUTES:
@@ -287,15 +289,15 @@ def build_fixture(seed: int = 0) -> dict[str, list[Trajectory]]:
     """About 950 trajectories in the five files, every cell of the design present."""
     rng = random.Random(seed)
     data = {
-        "train": _make_set(rng, "train", 72, 3),
-        "val": _make_set(rng, "val", 100, 0),
-        "test": _make_set(rng, "test", 80, 4),
+        "train": _make_set(rng, "train", 48, 96, 3),
+        "val": _make_set(rng, "val", 70, 130, 0),
+        "test": _make_set(rng, "test", 56, 104, 4),
         "dilution": [],
         "val_dilution": [],
     }
     for dilution in (2, 4):
-        data["dilution"] += _make_set(rng, "dilution", 20, 3, ("unaware",), dilution, start=len(data["dilution"]))
-        data["val_dilution"] += _make_set(rng, "val_dilution", 30, 0, (), dilution, start=len(data["val_dilution"]))
+        data["dilution"] += _make_set(rng, "dilution", 12, 28, 3, ("unaware",), dilution, start=len(data["dilution"]))
+        data["val_dilution"] += _make_set(rng, "val_dilution", 20, 40, 0, (), dilution, start=len(data["val_dilution"]))
     return data
 
 

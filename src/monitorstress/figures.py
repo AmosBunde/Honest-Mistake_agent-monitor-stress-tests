@@ -6,7 +6,8 @@
 4. e6_dilution.png          recall against dilution (E6)
 
 Every monitor has one color in every figure (Okabe-Ito palette, safe for color-blind
-readers). Error bars are the 95% bootstrap intervals from the result files.
+readers). The `artifact` baseline (number of steps and command names only) is light gray
+and comes last. Error bars are the 95% bootstrap intervals from the result files.
 """
 from __future__ import annotations
 
@@ -22,15 +23,16 @@ from matplotlib.patches import Patch  # noqa: E402
 from .schema import AWARENESS, DILUTIONS, ROUTES  # noqa: E402
 
 COLORS = {
-    "rules": "#666666",
+    "rules": "#000000",
     "tfidf": "#0072B2",
     "embed": "#E69F00",
     "trace": "#009E73",
     "llm-smollm2-360m": "#CC79A7",
     "llm-qwen2.5-0.5b": "#D55E00",
     "llm-qwen2.5-1.5b": "#56B4E9",
+    "artifact": "#AAAAAA",  # the structure-only baseline: neutral gray, last in every legend
 }
-FALLBACK_COLORS = ["#000000", "#F0E442", "#999999"]
+FALLBACK_COLORS = ["#F0E442", "#882255", "#44AA99"]
 MONITOR_ORDER = list(COLORS)
 DPI = 150
 
@@ -43,7 +45,9 @@ def color_of(monitor: str) -> str:
 
 def ordered(monitors) -> list[str]:
     monitors = set(monitors)
-    return [m for m in MONITOR_ORDER if m in monitors] + sorted(monitors - set(MONITOR_ORDER))
+    known = [m for m in MONITOR_ORDER if m in monitors]
+    others = sorted(monitors - set(MONITOR_ORDER))
+    return [m for m in known if m != "artifact"] + others + [m for m in known if m == "artifact"]
 
 
 def _load(results_dir: Path, experiment: str) -> dict | None:
