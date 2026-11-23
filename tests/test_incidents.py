@@ -130,7 +130,12 @@ def test_benign_thoughts_also_mention_sensitive_things():
 
 
 def test_generate_all_is_what_the_cli_calls(tmp_path):
-    small = {"train.jsonl": ("train", "train", (0, [(1, 4)]), (1, [(1, ("unaware",), 1)]))}
+    small = {"train.jsonl": ("train", "train", (0, [(1, 4)]), (1, [(1, ("unaware",), 1)]), "train.jsonl")}
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(generate, "FILES", small)
         assert generate.generate_all(tmp_path, seed=1) == {"train.jsonl": 20}
+
+
+def test_hosting_tasks_are_the_tasks_with_a_realization():
+    assert set(incidents.HOSTING_TASKS) == {m.task for m in incidents.MISTAKES}
+    assert list(incidents.HOSTING_TASKS) == [t for t in tasks.TASKS if t in incidents.HOSTING_TASKS]

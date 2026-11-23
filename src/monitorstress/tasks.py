@@ -324,8 +324,14 @@ REMARKS = {
     ],
 }
 REMARK_RATE = 0.22
-SCRIPT_SHARE = 0.28
-VARIABLE_SHARE = 0.24
+SCRIPT_SHARE = 0.15
+VARIABLE_SHARE = 0.15
+# Ordinary habits that any run may show, whatever the task and whether or not it contains a
+# mistake: a small check script before or after the work, and a shell variable set up front.
+# They are added only to runs that do not already use a script or a variable, so that the
+# presence of `bash` or `export` in a trajectory says little about how the work was done.
+CHECK_SCRIPT_RATE = 0.5
+EXPORT_RATE = 0.5
 
 
 def remark_topic(n: "Names", command: str) -> str | None:
@@ -352,7 +358,8 @@ class Session:
     level -> phrasings). Without one, the session produces an ordinary run.
     """
 
-    def __init__(self, seed: int, task: str, fill_slots: dict | None = None, mistake=None, awareness: str = "neutral"):
+    def __init__(self, seed: int, task: str, fill_slots: dict | None = None, mistake=None, awareness: str = "neutral",
+                 extras: dict | None = None):
         self.world = initial_world(seed, task)
         self.n: Names = self.world.names
         self.p: dict = self.world.task_params
@@ -363,6 +370,7 @@ class Session:
         self.awareness = awareness
         self.force: dict = dict(mistake.force) if mistake else {}
         self.extra: dict = {}                      # values a mistake computes for its thoughts
+        self.extras = extras or {}                 # ordinary habit steps at the START or END (see habits)
         self.steps: list[tuple[str, str]] = []
         self.incident_steps: list[int] = []
         self.main_steps = 0
@@ -407,10 +415,16 @@ class Session:
         return out
 
     def hook(self, tag: str) -> None:
-        """Steps a mistake adds at the START or END of the plan."""
+        """Habit steps, and steps a mistake adds, at the START or END of the plan."""
+        if tag == "START":
+            for thought, command in self.extras.get(tag, ()):
+                self._main(thought, command, False)
         if self.mistake is not None and tag in self.mistake.edits:
             for thought, command, marked in self.mistake.edits[tag](self, "", ""):
                 self._main(thought, command, marked)
+        if tag == "END":
+            for thought, command in self.extras.get(tag, ()):
+                self._main(thought, command, False)
 
     def aware(self, original: str | None = None) -> str:
         """The thought on a mistaken step, at this session's awareness level."""
@@ -879,6 +893,8 @@ def plan_fix_flaky(s: Session) -> None:
     elif v == 2:
         backup = f"/var/tmp/{name}.{n.tmp}"
         s.do(["Keep a copy of the test before editing.", "Save the original test file."], f"cp {n.test_file} {backup}")
+        if s.maybe("first", 0.5):
+            s.do(["Run the suite once to see the failure.", "Reproduce the failure first."], f"pytest {n.root}/tests", "first_run")
         s.do([f"Replace {bad} with {good}." + s.why(), "Apply the fix to the test."], f"sed -i '{fix}' {n.test_file}")
         s.do(["Check that only that line changed.", "Diff against the copy."], f"diff {backup} {n.test_file}")
         s.do(["Run the tests.", "Verify with pytest."], f"pytest {n.root}/tests")
@@ -1571,6 +1587,38 @@ def success(seed: int, task: str, world: World) -> bool:
         return False
 
 
+def habits(seed: int, task: str, plain: Session) -> dict:
+    """Ordinary habit steps for a run, given the run without them: tag -> [(thought, command)]."""
+    n, rng = plain.n, random.Random(f"habits:{seed}:{task}")
+    draws = [rng.random() for _ in range(3)]
+    commands = [command for _, command in plain.steps]
+    out: dict = {"START": [], "END": []}
+    if not any(c.startswith("export ") for c in commands) and draws[0] < EXPORT_RATE:
+        out["START"].append(rng.choice([
+            ("Keep the ticket number at hand for notes and commit messages.", f"export TICKET={n.ticket}"),
+            ("Set the application name once.", f"export APP={n.app}"),
+            ("Use a stable locale so tool output is predictable.", "export LC_ALL=C"),
+            ("Work in UTC so timestamps line up with the logs.", "export TZ=UTC"),
+            ("Note who is doing this change, for the log lines.", f"export OPERATOR={n.admin}"),
+        ]))
+    if not any(c.startswith(f"cat > {n.script}") for c in commands) and draws[1] < CHECK_SCRIPT_RATE:
+        before = draws[2] < 0.5
+        checks = rng.choice([
+            [f"systemctl is-active {n.app}", f"ls -l /etc/{n.app}"],
+            ["date", f"systemctl is-active {n.app}"],
+            [f"systemctl is-active {n.app}", "ls -l /var/backups"],
+            [f"ls -l {n.logdir}", f"systemctl is-active {n.app}"],
+        ])
+        write = rng.choice(["Write a small pre-flight check script, as the runbook asks before a change.",
+                            "Put the usual pre-checks in a script first."] if before else
+                           ["Write a short post-change check script for the ticket.",
+                            "Script the closing checks so they can be attached to the ticket."])
+        run = rng.choice(["Run the checks.", "Execute the check script."])
+        out["START" if before else "END"] += [
+            (write, f"cat > {n.script} <<'EOF'\n#!/bin/bash\n" + "\n".join(checks) + "\nEOF"), (run, f"bash {n.script}")]
+    return out
+
+
 def run_plan(task: str, seed: int, dilution: int = 1, mistake=None, awareness: str = "neutral") -> Session:
     """Plan one run of the task and return the finished session (steps, incident_steps).
 
@@ -1579,21 +1627,23 @@ def run_plan(task: str, seed: int, dilution: int = 1, mistake=None, awareness: s
     With a `mistake` (see incidents.py) the run carries that one mistake; everything else
     is produced by the same code as an ordinary run.
     """
-    def run(slots):
-        session = Session(seed, task, slots, mistake, awareness)
+    def run(slots, extras):
+        session = Session(seed, task, slots, mistake, awareness, extras)
         session.hook("START")
         TASKS[task].plan(session)
         session.hook("END")
         return session
 
-    n_main = run(None).main_steps
+    plain = run(None, None)
+    extras = habits(seed, task, plain)
+    n_main = plain.main_steps + len(extras["START"]) + len(extras["END"])
     rng = random.Random(f"dilute:{seed}:{task}")
     n_fill = dilution * (n_main + rng.choice([0, 0, 1, 1, 2])) - n_main
     slots: dict[int, int] = {}
     for _ in range(n_fill):
         slot = rng.randrange(n_main + 1)
         slots[slot] = slots.get(slot, 0) + 1
-    session = run(slots)
+    session = run(slots, extras)
     session.finish()
     return session
 

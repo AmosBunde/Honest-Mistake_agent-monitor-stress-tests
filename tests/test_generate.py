@@ -1,22 +1,25 @@
 """The dataset builder: counts, balance, determinism, validation by execution."""
+from collections import Counter
+
 import pytest
 
-from monitorstress import generate, tasks
+from monitorstress import generate, incidents, tasks
 from monitorstress.schema import AWARENESS, HARMS, ROUTES, read_jsonl
 from monitorstress.world import execute
 
 SMALL = {
-    "train.jsonl": ("train", "train", (0, [(1, 60)]), (1, [(1, AWARENESS, 1)])),
-    "val.jsonl": ("val", "val", (10, [(1, 60)]), None),
-    "test.jsonl": ("test", "test", (11, [(1, 60)]), (14, [(1, AWARENESS, 1)])),
-    "dilution.jsonl": ("dil", "test", (12, [(2, 30), (4, 30)]), (15, [(2, ("unaware",), 1), (4, ("unaware",), 1)])),
-    "val_dilution.jsonl": ("valdil", "val", (13, [(2, 30), (4, 30)]), None),
+    "train.jsonl": ("train", "train", (0, [(1, 60)]), (1, [(1, AWARENESS, 1)]), "train.jsonl"),
+    "val.jsonl": ("val", "val", (10, [(1, 60)]), None, "test.jsonl"),
+    "test.jsonl": ("test", "test", (11, [(1, 60)]), (14, [(1, AWARENESS, 1)]), "test.jsonl"),
+    "dilution.jsonl": ("dil", "test", (12, [(2, 30), (4, 30)]), (15, [(2, ("unaware",), 1), (4, ("unaware",), 1)]),
+                       "dilution.jsonl"),
+    "val_dilution.jsonl": ("valdil", "val", (13, [(2, 30), (4, 30)]), None, "dilution.jsonl"),
 }
 
 
 def planned(spec) -> tuple[int, int]:
     """(benign rows, incident rows) a file spec asks for."""
-    _, _, benign, incident = spec
+    _, _, benign, incident, _ = spec
     n_incident = sum(16 * len(levels) * per for _, levels, per in incident[1]) if incident else 0
     return sum(count for _, count in benign[1]), n_incident
 
@@ -47,13 +50,32 @@ def test_files_counts_and_balance(data):
         for dilution, count in spec[2][1]:
             part = [t for t in rows if t.dilution == dilution and t.label == 0]
             assert len(part) == count
-            assert sum(t.kind == "benign_hard" for t in part) == count // 2
-            assert sum(t.kind == "benign" for t in part) == count // 2
+            assert all(t.kind == tasks.TASKS[t.task].kind for t in part)
         for t in rows:
             if t.label == 0:
                 assert t.harms_fired == [] and t.incident_steps == [] and t.awareness == "neutral"
             else:
                 assert t.kind == "incident" and t.harms_fired == [t.harm] and t.incident_steps
+
+
+def test_benign_task_mix_follows_the_incident_task_mix():
+    """Among hosting tasks, a task's share of benign rows equals its share of incidents."""
+    hosting = incidents.HOSTING_TASKS
+    assert len(hosting) >= 10 and set(hosting) < set(tasks.TASKS)
+    for name, (_, _, benign, _, mix_from) in generate.FILES.items():
+        parts = generate.FILES[mix_from][3][1]
+        for dilution, count in benign[1]:
+            mix = Counter(generate.benign_tasks(count, parts, dilution, "k"))
+            assert sum(mix.values()) == count
+            easy = {t: c for t, c in mix.items() if t not in hosting}
+            assert sum(easy.values()) == round(0.15 * count) and max(easy.values()) - min(easy.values()) <= 1
+            wanted = Counter(m.task for d, _, m in generate.incident_plan(parts) if d == dilution)
+            n_host, n_inc = count - sum(easy.values()), sum(wanted.values())
+            for task in hosting:
+                assert abs(mix[task] - n_host * wanted[task] / n_inc) < 1, (name, task)
+    same = lambda a, b, d: generate.benign_tasks(500, generate.FILES[a][3][1], d, "k") == \
+        generate.benign_tasks(500, generate.FILES[generate.FILES[b][4]][3][1], d, "k")
+    assert same("test.jsonl", "val.jsonl", 1) and same("dilution.jsonl", "val_dilution.jsonl", 4)
 
 
 def test_incident_cells_are_balanced(data):

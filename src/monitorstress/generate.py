@@ -11,6 +11,8 @@ steps for a task goes in, a validated Trajectory comes out.
 from __future__ import annotations
 
 import argparse
+import random
+from collections import Counter
 from pathlib import Path
 
 from . import incidents, tasks
@@ -20,17 +22,55 @@ from .world import execute
 SEEDS_PER_BLOCK = 1_000_000
 MAX_ATTEMPTS = 60
 
+EASY_SHARE = 0.15   # share of benign rows from tasks that never host an incident
+
 # file name -> id prefix, split, benign (seed block, [(dilution, rows)]),
-#              incidents (seed block, [(dilution, awareness levels, rows per cell and level)])
+#              incidents (seed block, [(dilution, awareness levels, rows per cell and level)]),
+#              file whose incidents set the benign task mix
 # Seed blocks below 10 give seeds under tasks.HELDOUT_SEED_START (training name pools); val
 # and test use blocks from 10 up (the shared held-out pools).
 FILES = {
-    "train.jsonl": ("train", "train", (0, [(1, 1200)]), (1, [(1, AWARENESS, 25)])),
-    "val.jsonl": ("val", "val", (10, [(1, 2000)]), None),
-    "test.jsonl": ("test", "test", (11, [(1, 2000)]), (14, [(1, AWARENESS, 40)])),
-    "dilution.jsonl": ("dil", "test", (12, [(2, 500), (4, 500)]), (15, [(2, ("unaware",), 30), (4, ("unaware",), 30)])),
-    "val_dilution.jsonl": ("valdil", "val", (13, [(2, 500), (4, 500)]), None),
+    "train.jsonl": ("train", "train", (0, [(1, 1200)]), (1, [(1, AWARENESS, 25)]), "train.jsonl"),
+    "val.jsonl": ("val", "val", (10, [(1, 2000)]), None, "test.jsonl"),
+    "test.jsonl": ("test", "test", (11, [(1, 2000)]), (14, [(1, AWARENESS, 40)]), "test.jsonl"),
+    "dilution.jsonl": ("dil", "test", (12, [(2, 500), (4, 500)]), (15, [(2, ("unaware",), 30), (4, ("unaware",), 30)]),
+                       "dilution.jsonl"),
+    "val_dilution.jsonl": ("valdil", "val", (13, [(2, 500), (4, 500)]), None, "dilution.jsonl"),
 }
+
+
+def incident_plan(parts: list) -> list[tuple]:
+    """(dilution, awareness, mistake) for every incident row the parts ask for, in file order."""
+    out = []
+    for dilution, levels, per_cell in parts:
+        for harm, route in incidents.CELLS:
+            realizations = incidents.cell(harm, route)
+            for awareness in levels:
+                out += [(dilution, awareness, realizations[k % len(realizations)]) for k in range(per_cell)]
+    return out
+
+
+def benign_tasks(count: int, incident_parts: list, dilution: int, key: str) -> list[str]:
+    """The task of each of `count` benign rows.
+
+    Among the tasks that host incidents, each task's share of the benign rows equals its
+    share of the incidents (of the same dilution) in the reference file, so that the task
+    alone says nothing about the label. The remaining EASY_SHARE of the rows is spread
+    evenly over the tasks that never host an incident.
+    """
+    hosting = Counter(m.task for d, _, m in incident_plan(incident_parts) if d == dilution)
+    easy = [name for name in tasks.TASKS if name not in incidents.HOSTING_TASKS]
+    n_easy = round(count * EASY_SHARE)
+    quotas = {name: n_easy / len(easy) for name in easy}
+    total = sum(hosting.values())
+    quotas.update({name: (count - n_easy) * hosting[name] / total for name in incidents.HOSTING_TASKS})
+    counts = {name: int(q) for name, q in quotas.items()}
+    by_remainder = sorted(quotas, key=lambda name: (counts[name] - quotas[name], name))
+    for name in by_remainder[:count - sum(counts.values())]:
+        counts[name] += 1
+    order = [name for name in tasks.TASKS for _ in range(counts.get(name, 0))]
+    random.Random(f"mix:{key}").shuffle(order)
+    return order
 
 
 def row_seed(base_seed: int, block: int, index: int) -> int:
@@ -75,15 +115,13 @@ def incident_row(row_id: str, split: str, seed: int, mistake: incidents.Mistake,
                             incident_steps=tuple(incident_steps), require_success=False)
 
 
-def benign_rows(prefix: str, split: str, block: int, parts: list, base_seed: int, start: int = 0) -> list[Trajectory]:
-    """Half ordinary, half hard benign, cycling through the tasks of each kind."""
+def benign_rows(prefix: str, split: str, block: int, parts: list, base_seed: int, mix: list) -> list[Trajectory]:
+    """Benign rows whose task mix follows the incidents described by `mix` (see benign_tasks)."""
     rows = []
     for dilution, count in parts:
-        for i in range(count):
+        for task in benign_tasks(count, mix, dilution, f"{base_seed}:{prefix}:{dilution}"):
             index = len(rows)
-            names = tasks.HARD_TASKS if i % 2 else tasks.BENIGN_TASKS
-            task = names[(i // 2) % len(names)]
-            rows.append(benign_row(f"{prefix}-{start + index:06d}", split, row_seed(base_seed, block, index), task, dilution))
+            rows.append(benign_row(f"{prefix}-{index:06d}", split, row_seed(base_seed, block, index), task, dilution))
     return rows
 
 
@@ -94,29 +132,24 @@ def incident_rows(prefix: str, split: str, block: int, parts: list, base_seed: i
     seed is tried.
     """
     rows = []
-    for dilution, levels, per_cell in parts:
-        for harm, route in incidents.CELLS:
-            realizations = incidents.cell(harm, route)
-            for awareness in levels:
-                for k in range(per_cell):
-                    index = len(rows)
-                    mistake = realizations[k % len(realizations)]
-                    for attempt in range(MAX_ATTEMPTS):
-                        seed = row_seed(base_seed, block, index + 7919 * attempt)
-                        try:
-                            rows.append(incident_row(f"{prefix}-{start + index:06d}", split, seed, mistake, awareness, dilution))
-                            break
-                        except ValueError:
-                            continue
-                    else:
-                        raise RuntimeError(f"no valid incident for {mistake.name} after {MAX_ATTEMPTS} seeds")
+    for dilution, awareness, mistake in incident_plan(parts):
+        index = len(rows)
+        for attempt in range(MAX_ATTEMPTS):
+            seed = row_seed(base_seed, block, index + 7919 * attempt)
+            try:
+                rows.append(incident_row(f"{prefix}-{start + index:06d}", split, seed, mistake, awareness, dilution))
+                break
+            except ValueError:
+                continue
+        else:
+            raise RuntimeError(f"no valid incident for {mistake.name} after {MAX_ATTEMPTS} seeds")
     return rows
 
 
-def file_rows(name: str, base_seed: int) -> list[Trajectory]:
-    prefix, split, benign, incident = FILES[name]
-    rows = benign_rows(prefix, split, benign[0], benign[1], base_seed)
-    if incident is not None:
+def file_rows(name: str, base_seed: int, incidents_too: bool = True) -> list[Trajectory]:
+    prefix, split, benign, incident, mix_from = FILES[name]
+    rows = benign_rows(prefix, split, benign[0], benign[1], base_seed, FILES[mix_from][3][1])
+    if incident is not None and incidents_too:
         rows += incident_rows(prefix, split, incident[0], incident[1], base_seed, start=len(rows))
     return rows
 
@@ -128,10 +161,7 @@ def generate_all(out_dir: str | Path, seed: int = 2026) -> dict[str, int]:
 
 def generate_benign(out_dir: str | Path, seed: int = 2026) -> dict[str, int]:
     """Write the five files with their benign rows only."""
-    counts = {}
-    for name, (prefix, split, benign, _) in FILES.items():
-        counts[name] = write_jsonl(Path(out_dir) / name, benign_rows(prefix, split, benign[0], benign[1], seed))
-    return counts
+    return {name: write_jsonl(Path(out_dir) / name, file_rows(name, seed, incidents_too=False)) for name in FILES}
 
 
 def main() -> None:
