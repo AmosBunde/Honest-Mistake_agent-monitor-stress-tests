@@ -17,7 +17,7 @@ src/monitorstress/
   metrics.py      threshold at a false-positive rate, recall, AUROC, bootstrap intervals
   experiments.py  E0 artifact check and E1 to E7
   figures.py      plots from results/*.json
-  cli.py          `monitorstress generate | run | figures`
+  cli.py          `monitorstress generate | run | bench-llm | figures | posthoc | reanalyze`
 tests/
 data/             generated .jsonl files (not committed; regenerated from seeds)
 results/          summary.json, per-experiment json, scores/*.csv

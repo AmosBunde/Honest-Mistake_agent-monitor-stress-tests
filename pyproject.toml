@@ -1,7 +1,7 @@
 [project]
 name = "monitorstress"
 version = "0.1.0"
-description = "Stress tests for monitors that watch AI agents: a simulated machine with exact ground truth, attacks that hide, and held-out evasion experiments."
+description = "Stress tests for monitors that watch AI agents: a simulated machine with exact ground truth, honest mistakes that break a safety policy, and held-out experiments."
 requires-python = ">=3.11"
 dependencies = [
   "numpy>=1.26",
