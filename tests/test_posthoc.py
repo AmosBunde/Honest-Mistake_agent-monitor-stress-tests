@@ -179,3 +179,12 @@ def test_reporting_additions(run_dir):
             assert mean["pooled_gap_closed_included_folds"] == pytest.approx(expected)
         else:
             assert mean["pooled_gap_closed_included_folds"] is None
+
+
+def test_posthoc_figures_are_drawn(run_dir, tmp_path):
+    from monitorstress import figures
+
+    out = run_dir[0]
+    written = [p.name for p in figures.make_all(out, tmp_path / "img")]
+    assert "posthoc_p1_violation.png" in written and "posthoc_p2_mistake.png" in written
+    assert all((tmp_path / "img" / name).stat().st_size > 10_000 for name in written)

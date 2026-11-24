@@ -4,6 +4,11 @@
 2. e3_held_out_route.png    direct-only vs leave-one-out vs all-four training, per held-out route (E3)
 3. e5_thoughts.png          recall by awareness level, with and without the agent's thoughts (E5)
 4. e6_dilution.png          recall against dilution (E6)
+5. posthoc_p1_violation.png held-out violation with and without the task confound (post hoc P1)
+6. posthoc_p2_mistake.png   seen against held-out mistakes within a seen route (post hoc P2)
+
+A figure is drawn only if its result file exists, and a monitor appears only if it has
+rows, so the figures can be drawn before the language-model monitors have finished.
 
 Every monitor has one color in every figure (Okabe-Ito palette, safe for color-blind
 readers). The `artifact` baseline (number of steps and command names only) is light gray
@@ -182,7 +187,7 @@ def figure_e6(result: dict, out_dir: Path) -> Path | None:
     panels = [(title, names) for title, names in panels if names]
     if not panels:
         return None
-    fig, axes = plt.subplots(1, len(panels), figsize=(4.4 * len(panels), 3.7), sharey=True, squeeze=False)
+    fig, axes = plt.subplots(1, len(panels), figsize=(max(6.4, 4.6 * len(panels)), 3.9), sharey=True, squeeze=False)
     positions = {d: i for i, d in enumerate(DILUTIONS)}
     for ax, (title, names) in zip(axes[0], panels):
         for k, monitor in enumerate(names):
@@ -205,13 +210,75 @@ def figure_e6(result: dict, out_dir: Path) -> Path | None:
         ax.set_xlabel("Dilution (length of the ordinary part)")
         ax.set_title(title, fontsize=10)
         _style(ax, "Recall on unaware incidents" if ax is axes[0][0] else None)
-        ax.legend(frameon=False, fontsize=8, loc="lower left")
-    fig.text(0.5, -0.06, "Solid: threshold set on validation at the matching dilution.  "
-                         "Dashed: threshold from dilution-1 validation.", ha="center", fontsize=8, color="#444444")
+        ax.legend(frameon=False, fontsize=8, loc="upper left", ncol=2)
+    fig.text(0.5, -0.09, "Solid: threshold set on benign validation runs at the matching dilution, so the false-positive rate holds.\n"
+                         "Dashed: threshold from dilution-1 validation; the false-positive rate then rises with dilution (see the report).",
+             ha="center", fontsize=8, color="#444444")
     return _save(fig, out_dir, "e6_dilution.png")
 
 
-FIGURES = (("E2", figure_e2), ("E3", figure_e3), ("E5", figure_e5), ("E6", figure_e6))
+# --------------------------------------------------------------------------- 5, 6 (post hoc)
+
+P1_TRAININGS = (("in_distribution", "all four violations in training", 1.0),
+                ("held_out", "violation held out (E4 as planned)", 0.3),
+                ("held_out_task_matched", "held out, benign runs of its tasks removed (post hoc)", 0.6))
+
+
+def figure_p1(result: dict, out_dir: Path) -> Path | None:
+    rows = _rows(result["rows"], fpr_target=0.01)
+    monitors = ordered({r["monitor"] for r in rows})
+    folds = list(dict.fromkeys(r["fold"] for r in rows))
+    if not monitors:
+        return None
+    fig, axes = plt.subplots(2, len(monitors), figsize=(3.9 * len(monitors), 6.2), sharey="row", squeeze=False)
+    width = 0.8 / len(P1_TRAININGS)
+    for column, monitor in enumerate(monitors):
+        top, bottom = axes[0][column], axes[1][column]
+        for j, fold in enumerate(folds):
+            for i, (training, _, alpha) in enumerate(P1_TRAININGS):
+                row = _one(rows, monitor=monitor, fold=fold, training=training)
+                x = j + (i - 1) * width
+                _bar(top, x, row, width, color_of(monitor), alpha)
+                if row is not None:
+                    _bar(bottom, x, {"recall": row["auroc_all_benign"], "ci_low": row["auroc_all_benign_ci_low"],
+                                     "ci_high": row["auroc_all_benign_ci_high"]}, width, color_of(monitor), alpha)
+        top.set_title(monitor, color=color_of(monitor), fontsize=11)
+        bottom.axhline(0.5, color="#222222", linewidth=0.8, linestyle=":")
+        for ax in (top, bottom):
+            ax.set_xticks(range(len(folds)), folds, fontsize=8, rotation=20)
+        bottom.set_xlabel("Violation tested")
+        _style(top, "Recall at 1% false-positive rate" if column == 0 else None)
+        _style(bottom, "AUROC against all benign runs" if column == 0 else None)
+    axes[1][0].text(-0.45, 0.515, "chance", fontsize=7, color="#222222")
+    fig.legend(handles=[Patch(color="#444444", alpha=alpha, label=label) for _, label, alpha in P1_TRAININGS],
+               frameon=False, ncol=1, loc="lower center", bbox_to_anchor=(0.5, 0.94), fontsize=9)
+    return _save(fig, out_dir, "posthoc_p1_violation.png")
+
+
+def figure_p2(result: dict, out_dir: Path) -> Path | None:
+    rows = _rows(result["rows"], fpr_target=0.01, test_group="both")
+    monitors = ordered({r["monitor"] for r in rows})
+    if not monitors:
+        return None
+    groups = list(ROUTES) + ["all"]
+    fig, axes = plt.subplots(1, len(monitors), figsize=(3.9 * len(monitors), 3.6), sharey=True, squeeze=False)
+    width = 0.38
+    for ax, monitor in zip(axes[0], monitors):
+        for j, route in enumerate(groups):
+            _bar(ax, j - width / 2, _one(rows, monitor=monitor, route=route, templates="seen"), width, color_of(monitor), 1.0)
+            _bar(ax, j + width / 2, _one(rows, monitor=monitor, route=route, templates="held_out"), width, color_of(monitor), 0.4)
+        ax.set_xticks(range(len(groups)), [g if g != "all" else "all routes" for g in groups], fontsize=8, rotation=20)
+        ax.set_title(monitor, color=color_of(monitor), fontsize=11)
+        ax.set_xlabel("Route of the tested incidents")
+        _style(ax, "Recall at 1% false-positive rate" if ax is axes[0][0] else None)
+    fig.legend(handles=[Patch(color="#444444", alpha=1.0, label="mistake seen in training (under other names)"),
+                        Patch(color="#444444", alpha=0.4, label="mistake held out, its route seen")],
+               frameon=False, ncol=2, loc="lower center", bbox_to_anchor=(0.5, 0.98))
+    return _save(fig, out_dir, "posthoc_p2_mistake.png")
+
+
+FIGURES = (("E2", figure_e2), ("E3", figure_e3), ("E5", figure_e5), ("E6", figure_e6),
+           ("posthoc_P1", figure_p1), ("posthoc_P2", figure_p2))
 
 
 def make_all(results_dir: str | Path = "results/", out_dir: str | Path = "docs/img/") -> list[Path]:
