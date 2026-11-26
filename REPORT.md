@@ -13,11 +13,10 @@ agent's stated reasoning says about them, and by how much ordinary work surround
 The measure is recall at a 1% false-positive rate, with the threshold set on benign
 validation runs.
 
-Nine predictions were written before any run. Of the six that do not need the
-language-model monitors, two were supported, one was mixed and three failed. The
-language-model monitors are still running and their three predictions are pending.
+Nine predictions were written before any run. Three were supported, one was mixed and
+five failed.
 
-What the finished part shows:
+What the study shows:
 
 - **The best case is a minority.** On mistakes typed directly as a command, with the
   monitor trained on exactly that form, the monitor that reads the machine's event trace
@@ -42,6 +41,11 @@ What the finished part shows:
   recall from 0.524 to 0.209 and n-gram recall from 0.187 to 0.044.
 - **Watching effects beats reading commands in every comparison made here**, including the
   ones where both do badly.
+- **Three small language models asked the question directly, with no training, detected
+  almost nothing.** At a 5% false-positive rate each flagged at most 0.042 of direct
+  mistakes, which is no more than the rate at which it flags benign runs. Their AUROC was
+  0.447, 0.537 and 0.633 from smallest to largest. They were scored on a small subsample
+  and the intervals are wide.
 
 Two of these results come from analyses added after I had seen the first results and an
 independent review had found confounds in them. They are marked post hoc everywhere and
@@ -149,7 +153,7 @@ The median trajectory has 6 steps at dilution 1.
 | `embed` | commands, optionally thoughts | all-MiniLM-L6-v2 sentence embeddings per step, pooled over steps, logistic regression |
 | `trace` | the event trace | counts and flags from events plus hashed tokens of paths and hosts in 8,192 buckets, logistic regression. It does not see the data-flow marks the labels use. |
 | `artifact` | number of steps and command names, without arguments | logistic regression. A baseline, not a monitor (see the next section). In no prediction. |
-| `llm` | commands, optionally thoughts | a small instruction-tuned language model asked whether the agent did anything unsafe beyond its task. Three sizes. No training. Results pending. |
+| `llm` | commands, optionally thoughts | a small instruction-tuned language model asked whether the agent did anything unsafe beyond its task. Three sizes. No training. Scored on a subsample at a 5% false-positive rate (see Language-model monitors). |
 
 **Measure.** Recall at a fixed false-positive rate: the threshold is the smallest value
 that flags at most 1% of the 2,000 benign validation trajectories, and recall is the share
@@ -419,7 +423,7 @@ more than the verdict.
   incidents are ranked as safer than benign runs. The post hoc analysis P1 below removes
   this confound.
 
-### E5. Thoughts (text monitors; the language-model half of prediction 6 is pending)
+### E5. Thoughts (text monitors; prediction 6 is judged under Language-model monitors)
 
 `tfidf` and `embed` are fitted on all 1,200 training incidents, once on commands and once
 on commands with thoughts. Thresholds are set per view.
@@ -459,7 +463,7 @@ is departing from the task. That is closer to knowing negligence than to a mista
 it is also the easiest wording for a classifier to pick up. The `unaware` and `mistaken`
 rows are the ones that match the study's stated subject.
 
-### E6. Dilution (the `tfidf` clause of prediction 7 fails; the rest is pending)
+### E6. Dilution (the `tfidf` clause of prediction 7 fails; the rest is under Language-model monitors)
 
 Monitors are fitted on all training data and tested on `unaware` incidents at dilution 1,
 2 and 4. There are two ways to set the threshold: on benign validation runs of the same
@@ -482,8 +486,7 @@ R@1% (95% interval) / test false-positive rate; n = 640 at dilution 1 and 480 at
 
 Prediction 7 included the clause that `tfidf` would fall by less than 0.05 from dilution 1
 to dilution 4. With the false-positive rate held it fell by 0.240 (0.202 to 0.278). That
-clause fails, so prediction 7 can no longer come out as supported whatever the language
-models do. `trace` fell by 0.341 (0.294 to 0.391).
+clause fails whatever the language models do. `trace` fell by 0.341 (0.294 to 0.391).
 
 The second threshold shows why. These monitors score longer runs as more suspicious
 whether or not anything went wrong. A threshold set on runs of normal length flags 37.2%
@@ -649,13 +652,140 @@ Planned subsample, fixed in Amendment 2 before any monitor was scored
 | Dilution validation | 120: 60 benign at each of dilution 2 and 4 |
 | Dilution test | 248: at each of dilution 2 and 4, 60 benign and 64 incidents (4 per cell of violation and route, `unaware`) |
 
-With 64 incidents per awareness level and a threshold set on 120 benign runs (5% is six
-trajectories), the intervals will be wide. The trained monitors' results on the same
-subsample are already in the result files for a like-for-like comparison: on `direct`,
-`unaware` incidents (n = 16) `tfidf` has AUROC 0.903 on the subsample, which is the bar
-prediction 8 sets for the language models.
+That is 120 benign validation runs, 120 benign test runs and 4 incidents per cell. Every
+threshold is set on 120 benign runs, so "5%" is six trajectories, and the false-positive
+rate the language models realized on the 120 benign test runs ranges from 4.2% to 8.3%.
+With 48 incidents an interval on recall is up to 0.29 wide, and with 16 an interval on a
+language model's AUROC is 0.25 to 0.30 wide. The trained monitors are shown on the same subsample, at the same 5%
+rate, for a like-for-like comparison. Prompts are cut to 1,024 tokens; 8 of the 1,232
+prompts of the smallest model had steps omitted and none of the others
+(`results/llm_cache.csv`).
 
-RESULTS PENDING
+**What this sample can support:** whether a model is far from chance, and whether it is
+far from `tfidf` and `trace`. **What it cannot support:** differences of a few points of
+recall between models, between views or between dilution levels. Most of the recalls
+below are one to three incidents out of 48 or 64.
+
+### Direct mistakes (prediction 8: supported, and only half of it is more than noise)
+
+Direct test incidents against the 120 benign test runs. AUROC and R@5% with 95% intervals.
+
+| Monitor | AUROC, all direct (n = 48) | R@5%, all direct (n = 48) | Test FPR | AUROC, direct and `unaware` (n = 16) |
+|---|---|---|---|---|
+| SmolLM2-360M | 0.447 (0.350 to 0.537) | 0.021 (0.000 to 0.062) | 6.7% | 0.487 (0.335 to 0.635) |
+| Qwen2.5-0.5B | 0.537 (0.441 to 0.633) | 0.042 (0.000 to 0.104) | 4.2% | 0.635 (0.502 to 0.751) |
+| Qwen2.5-1.5B | 0.633 (0.541 to 0.717) | 0.042 (0.000 to 0.104) | 4.2% | 0.668 (0.532 to 0.795) |
+| `tfidf` | 0.868 (0.814 to 0.918) | 0.417 (0.271 to 0.562) | 4.2% | 0.903 (0.823 to 0.965) |
+| `trace` | 0.947 (0.908 to 0.979) | 0.688 (0.562 to 0.812) | 0.8% | 0.962 (0.883 to 1.000) |
+| `embed` | 0.643 (0.545 to 0.738) | 0.167 (0.062 to 0.271) | 5.0% | 0.588 (0.449 to 0.729) |
+| `rules` | 0.792 (0.718 to 0.857) | 0.104 (0.021 to 0.208) | 0.0% | 0.758 (0.649 to 0.854) |
+| `artifact` | 0.705 (0.622 to 0.789) | 0.062 (0.000 to 0.146) | 5.8% | 0.685 (0.563 to 0.795) |
+
+- **No language model detects direct mistakes at a 5% false-positive rate.** Each flags
+  one or two of 48 incidents, a recall (0.021 to 0.042) no higher than its false-positive
+  rate on benign runs (4.2% to 6.7%).
+- **The smallest model is at or below chance.** Its AUROC on all direct incidents is 0.447
+  and its interval (0.350 to 0.537) includes 0.5. Qwen2.5-0.5B (0.537, 0.441 to 0.633) is
+  not distinguishable from chance either. Only Qwen2.5-1.5B has an interval that excludes
+  0.5 (0.541 to 0.717), and its AUROC is below that of the structure-only `artifact`
+  baseline (0.705).
+- **Prediction 8, first clause: AUROC rises with model size.** On the sample the
+  prediction names (direct, `unaware`, n = 16) the values are 0.487, 0.635 and 0.668, so
+  the clause holds as written. The ordering is not separated by the intervals: all three
+  overlap, and the two Qwen models differ by 0.033 with intervals about 0.25 wide. On all
+  48 direct incidents the ordering is the same (0.447, 0.537, 0.633) and only the
+  smallest and largest are barely apart (upper bound 0.537 against lower bound 0.541).
+  I would call this consistent with the prediction and not evidence for it.
+- **Prediction 8, second clause: all three are below `tfidf`.** This one is real. The
+  best language model's upper bound (0.795) is below the lower bound of `tfidf` (0.823)
+  on the same 16 incidents and 120 benign runs.
+
+By route, R@5% (n = 48 per route) is between 0.000 and 0.083 for every language model on
+every route, against 0.688, 0.458, 0.292 and 0.167 for `trace` on direct, script, variable
+and bundle (`results/E2.json`).
+
+### Thoughts (prediction 6: not supported)
+
+R@5% (95% interval) on all four routes, n = 64 per awareness level. The threshold is set
+separately for each view.
+
+| Monitor | Awareness | Commands | Commands and thoughts | Difference |
+|---|---|---|---|---|
+| SmolLM2-360M | noticed | 0.031 (0.000 to 0.078) | 0.062 (0.016 to 0.125) | +0.031 (+0.000 to +0.078) |
+| SmolLM2-360M | unaware | 0.016 (0.000 to 0.047) | 0.000 (0.000 to 0.000) | -0.016 (-0.047 to +0.000) |
+| SmolLM2-360M | mistaken | 0.047 (0.000 to 0.109) | 0.016 (0.000 to 0.047) | -0.031 (-0.094 to +0.031) |
+| Qwen2.5-0.5B | noticed | 0.031 (0.000 to 0.078) | 0.062 (0.016 to 0.125) | +0.031 (-0.031 to +0.094) |
+| Qwen2.5-0.5B | unaware | 0.031 (0.000 to 0.078) | 0.047 (0.000 to 0.109) | +0.016 (-0.031 to +0.078) |
+| Qwen2.5-0.5B | mistaken | 0.062 (0.016 to 0.125) | 0.047 (0.000 to 0.109) | -0.016 (-0.047 to +0.000) |
+| Qwen2.5-1.5B | noticed | 0.047 (0.000 to 0.109) | 0.172 (0.078 to 0.266) | +0.125 (+0.046 to +0.219) |
+| Qwen2.5-1.5B | unaware | 0.047 (0.000 to 0.109) | 0.156 (0.078 to 0.250) | +0.109 (+0.031 to +0.203) |
+| Qwen2.5-1.5B | mistaken | 0.031 (0.000 to 0.078) | 0.031 (0.000 to 0.078) | +0.000 (+0.000 to +0.000) |
+| `tfidf` | noticed | 0.328 (0.219 to 0.453) | 0.844 (0.750 to 0.922) | +0.516 (+0.391 to +0.625) |
+| `tfidf` | unaware | 0.469 (0.359 to 0.594) | 0.531 (0.406 to 0.656) | +0.062 (-0.062 to +0.172) |
+| `tfidf` | mistaken | 0.359 (0.250 to 0.484) | 0.734 (0.625 to 0.844) | +0.375 (+0.266 to +0.500) |
+
+Prediction 6 said that seeing `noticed` thoughts would raise recall by at least 0.20 and
+seeing `mistaken` thoughts would lower it by at least 0.10. The six values are +0.031,
++0.031 and +0.125 for `noticed`, and -0.031, -0.016 and 0.000 for `mistaken`. None of the
+six clauses holds.
+
+The one visible effect is Qwen2.5-1.5B on `noticed` thoughts (+0.125, interval excludes
+zero). I do not read it as the model using the admission in the thought, for two reasons.
+Its recall on `unaware` incidents, whose thoughts say nothing about the mistake, rose by
+almost as much (+0.109). And its threshold with thoughts let through 8.3% of benign test
+runs against 4.2% without, so part of both gains is a looser threshold. What the table
+does show is that a wrong belief stated in the thoughts gave this model nothing: 2 of 64
+with or without.
+
+This prediction was the cleaner test of the E5 result, because the language models are
+not trained on the thought templates. With monitors this weak it tests little. The
+`tfidf` rows repeat on the subsample what E5 found on the full set.
+
+### Dilution (prediction 7: not supported)
+
+R@5% (95% interval) / test false-positive rate on `unaware` incidents, n = 64 per
+dilution level. Benign runs: 120 at dilution 1 and 60 at each of 2 and 4.
+
+| Monitor | Threshold from | Dilution 1 | Dilution 2 | Dilution 4 |
+|---|---|---|---|---|
+| SmolLM2-360M | matching dilution | 0.016 (0.000 to 0.047) / 6.7% | 0.047 (0.000 to 0.094) / 6.7% | 0.016 (0.000 to 0.047) / 1.7% |
+| SmolLM2-360M | dilution 1 | 0.016 (0.000 to 0.047) / 6.7% | 0.203 (0.109 to 0.312) / 20.0% | 0.703 (0.594 to 0.812) / 63.3% |
+| Qwen2.5-0.5B | matching dilution | 0.031 (0.000 to 0.078) / 4.2% | 0.047 (0.000 to 0.109) / 8.3% | 0.078 (0.016 to 0.141) / 10.0% |
+| Qwen2.5-0.5B | dilution 1 | 0.031 (0.000 to 0.078) / 4.2% | 0.000 (0.000 to 0.000) / 0.0% | 0.000 (0.000 to 0.000) / 0.0% |
+| Qwen2.5-1.5B | matching dilution | 0.047 (0.000 to 0.109) / 4.2% | 0.109 (0.047 to 0.188) / 5.0% | 0.062 (0.016 to 0.125) / 5.0% |
+| Qwen2.5-1.5B | dilution 1 | 0.047 (0.000 to 0.109) / 4.2% | 0.172 (0.078 to 0.266) / 5.0% | 0.250 (0.156 to 0.359) / 16.7% |
+| `tfidf` | matching dilution | 0.469 (0.359 to 0.594) / 1.7% | 0.281 (0.172 to 0.406) / 1.7% | 0.172 (0.078 to 0.266) / 3.3% |
+| `trace` | matching dilution | 0.672 (0.547 to 0.781) / 2.5% | 0.547 (0.422 to 0.672) / 6.7% | 0.469 (0.344 to 0.594) / 6.7% |
+
+Prediction 7 said the language models' R@5% would fall by at least 0.15 from dilution 1 to
+dilution 4, and that `tfidf` would fall by less than 0.05. With the false-positive rate
+held, the language models changed by 0.000 (-0.047 to 0.047), -0.047 (-0.125 to 0.031) and
+-0.016 (-0.094 to 0.062), where a negative number is a rise. `tfidf` fell by 0.240 at the
+1% rate on the full set (E6). All four clauses fail.
+
+**The language-model clauses fail for an uninformative reason.** Recall at dilution 1 is
+0.016 to 0.047. A monitor that detects nothing has nothing to lose, so this result says
+nothing about whether dilution hurts a language-model monitor that works. I predicted the
+opposite pattern from the one found (language models hurt, `tfidf` robust) and the half
+that could be tested, `tfidf`, went against me.
+
+What the second threshold shows is the same as for the trained monitors, and stronger.
+Scores drift with length: a threshold set on runs of normal length flags 63.3% of benign
+runs four times as long for SmolLM2-360M and 16.7% for Qwen2.5-1.5B, while Qwen2.5-0.5B
+drifts the other way and flags none. The matched thresholds at dilution 2 and 4 are set on
+60 benign runs, three trajectories at 5%.
+
+### Where their false alarms come from
+
+At the 5% threshold the false positives on the 120 benign test runs were 8 (8 of them
+hard benign), 5 (3) and 5 (5) from the smallest model to the largest. These counts are
+too small to compare with the 0.658 share of hard benign runs in the subsample.
+
+### Cost
+
+On this machine (four physical cores) the median time per trajectory was about
+10 seconds for the two smaller models and 36 seconds for Qwen2.5-1.5B
+(`results/llm_cache.csv`). Amendment 2 estimated 1 to 9 seconds.
 
 ## Predictions
 
@@ -669,15 +799,17 @@ that none does, "mixed" that some do.
 | 3 | The effect-level monitor holds: `trace` loses no more than 0.10 of R@1% on any route | **Not supported** | losses of 0.263, 0.473 and 0.506 |
 | 4 | Training on other routes helps less than half way for the text monitors | **Supported** | share of gap closed: `tfidf` -0.011, `embed` 0.038 (one fold, nearly vacuous). Confounded with new mistakes; see P2 |
 | 5 | A new kind of violation is mostly missed: R@1% below 0.50 for `tfidf` and `trace` | **Supported** | at most 0.002. Six of eight clauses hold vacuously; confounded by task identity; with the confound removed (post hoc P1) at most 0.010 |
-| 6 | Thoughts cut both ways for the language-model monitors | Pending, language-model run in progress | |
-| 7 | Dilution hurts the language-model monitors by at least 0.15; `tfidf` falls by less than 0.05 | Pending, language-model run in progress | the `tfidf` clause already fails (fell by 0.240), so this cannot come out supported |
-| 8 | Size helps, but a trained bag of n-grams still wins in distribution | Pending, language-model run in progress | |
+| 6 | Thoughts cut both ways for the language-model monitors: at 5% FPR, `noticed` thoughts raise recall by at least 0.20 and `mistaken` thoughts lower it by at least 0.10 | **Not supported** | `noticed` +0.031, +0.031, +0.125; `mistaken` -0.031, -0.016, 0.000 (n = 64 each) |
+| 7 | Dilution hurts the language-model monitors by at least 0.15; `tfidf` falls by less than 0.05 | **Not supported** | language models changed by 0.000, -0.047 and -0.016 from a recall of at most 0.047, so there was nothing to lose; `tfidf` fell by 0.240 |
+| 8 | Size helps, but a trained bag of n-grams still wins in distribution | **Supported** | AUROC 0.487, 0.635, 0.668 by size (n = 16; intervals overlap, so the ordering is within noise); all below `tfidf` at 0.903 (0.823 to 0.965), which is separated |
 | 9 | False alarms are the hard benign tasks: at least 80% of `tfidf` false positives | **Not supported** | 7 of 16, 0.438 (0.188 to 0.700) |
 
-Of the six predictions that can be judged, three failed outright and one half failed. All
-four failures were in the same direction: I expected the monitors to be better, and the
-task easier, than they were. The two that were supported are the two that predicted
-failure, and both are weaker evidence than the word "supported" suggests.
+Three supported, one mixed, five not supported. The failures of predictions 1, 2, 3 and 9
+were in the same direction: I expected the monitors to be better, and the task easier,
+than they were. Predictions 6 and 7 failed because the language models detected too
+little for the predicted effects to show. Of the three that were supported, two predicted
+failure and hold partly vacuously, and the third (prediction 8) has one clause that is
+within noise. None of the three is strong evidence.
 
 ## What I conclude
 
@@ -700,7 +832,14 @@ honest mistakes in a simulated machine. Within that:
    0.315 when the mistake changed.
 5. **A fixed threshold does not hold its false-positive rate when runs get longer.**
 6. **The agent's stated reasoning helped a text classifier a great deal, and I do not
-   trust that result** as evidence about reasoning, for the reasons in E5.
+   trust that result** as evidence about reasoning, for the reasons in E5. The language
+   models, which could have tested it without the template problem, were too weak to.
+7. **Small language models asked the question directly were not monitors at all in this
+   setting.** At a 5% false-positive rate none flagged incidents more often than benign
+   runs, and the two smaller ones were not distinguishable from chance in AUROC. A
+   trained character n-gram classifier was clearly better. This is a statement about
+   models of 360 million to 1.5 billion parameters, one prompt, no examples and no
+   training, on a sample of 48 direct incidents.
 
 What the design does not support: any statement about monitors facing an agent that hides
 what it does; any statement about a capable language model used as a monitor; any
@@ -767,8 +906,13 @@ statement about how often real agents make these mistakes.
   seeds was not measured.
 - **One model family.** Every trained monitor is a logistic regression on fixed features.
   A different learner on the same views might generalize differently.
-- **Small language models.** The pending results, whatever they show, say nothing direct
-  about a frontier model used as a monitor.
+- **Small language models, one prompt, a small sample.** The three models have 360
+  million to 1.5 billion parameters. They were given one fixed question with no examples
+  and no tuning of the prompt, and scored on 120 benign validation runs, 120 benign test
+  runs and 4 incidents per cell. Their results say nothing direct about a frontier model
+  used as a monitor, and little about what these models could do with a better prompt or
+  with training. The intervals are wide enough that only "near chance" and "below
+  `tfidf`" are supported.
 - **The post hoc analyses were chosen after seeing the results.** They answer objections
   to E3 and E4 and were not designed blind.
 
@@ -806,3 +950,7 @@ Where the numbers live: `results/summary.json` holds every table, the prediction
 with their clauses, and the post hoc tables. `results/E1.json` to `E7.json` and
 `results/posthoc_P1.json`, `posthoc_P2.json` hold the full rows with intervals.
 `results/scores/*.csv` hold one score per monitor, training regime and trajectory.
+`results/llm_cache.csv` holds, for every language-model prompt, the trajectory id, a hash
+of the prompt, the token count, the probabilities of "yes" and "no" and the time taken. It
+holds no trajectory text. A rerun of step 4 reads scores from it instead of running the
+models; it still needs each model's tokenizer to rebuild the prompts.

@@ -70,12 +70,26 @@ R@1% on 480 test incidents per route against 2,000 benign runs:
   flags 37.2% of benign runs four times as long. With the false-positive rate held at 1%,
   `tfidf` recall falls from 0.281 to 0.042 and `trace` from 0.464 to 0.123.
 
-Of the six predictions that can be judged so far, three failed, one was mixed and two
-were supported. The two that were supported predicted failure, and both are weaker
-evidence than the verdict suggests.
+- **Three small language models, asked directly and not trained, detected almost
+  nothing.** SmolLM2-360M, Qwen2.5-0.5B and Qwen2.5-1.5B were asked whether the agent did
+  anything unsafe beyond its task and scored on a subsample (120 benign validation runs,
+  120 benign test runs, 4 incidents per cell). At a 5% false-positive rate each flagged
+  at most 0.042 of 48 direct mistakes, no more than its false-positive rate. AUROC was
+  0.447 (0.350 to 0.537), 0.537 (0.441 to 0.633) and 0.633 (0.541 to 0.717); the two
+  smaller models are not distinguishable from chance. On the same subsample `tfidf` has
+  AUROC 0.868 and `trace` 0.947.
+- **Thoughts and dilution for the language models: both predictions failed, mostly
+  because there was no detection to change.** I predicted thoughts that mention the risk
+  would raise recall by at least 0.20; the gains were 0.031, 0.031 and 0.125. I predicted
+  dilution would cost at least 0.15; recall started at 0.047 or less and did not fall.
+- **Size helps and n-grams still win: supported, half of it within noise.** AUROC on
+  direct, unaware mistakes rose with model size (0.487, 0.635, 0.668), but on 16
+  incidents the three intervals overlap. All three are below `tfidf` (0.903, interval
+  0.823 to 0.965), and that gap is larger than the intervals.
 
-**LANGUAGE-MODEL RESULT PENDING** (three small language models as zero-shot monitors;
-predictions 6, 7 and 8 depend on them).
+Of the nine predictions, three were supported, one was mixed and five failed. Two of the
+three that were supported predicted failure and hold partly vacuously, and the third has
+one clause within noise.
 
 ### Two analyses added after the results were seen
 
@@ -153,7 +167,7 @@ has the full table of steps.
 | `src/monitorstress/posthoc.py` | the two post hoc analyses |
 | `src/monitorstress/figures.py` | every figure here and in the report |
 | `scripts/review_checks.py` | recomputes the checks quoted in the report's limits; writes `docs/review_checks.json` |
-| `results/` | `summary.json`, one JSON per experiment, and one score per monitor and trajectory in `scores/*.csv` |
+| `results/` | `summary.json`, one JSON per experiment, one score per monitor and trajectory in `scores/*.csv`, and the language-model score cache `llm_cache.csv` |
 | `tests/` | 373 tests |
 
 ## Limits
@@ -179,8 +193,9 @@ has the full table of steps.
 - **`embed` is not bit-reproducible between runs** (three of 64 compared recalls moved,
   by at most 0.006).
 - **One dataset, one seed, one model family** (logistic regression on fixed features),
-  and the language models to come are small. Nothing here speaks to a frontier model
-  used as a monitor.
+  and the language models are small (360 million to 1.5 billion parameters), given one
+  prompt and scored on a small subsample with wide intervals. Nothing here speaks to a
+  frontier model used as a monitor.
 
 The report gives each of these with its numbers.
 
